@@ -1,8 +1,8 @@
-// Publicatielink van uitsluitend de vijf afgesproken dagtabbladen.
+// Publicatie van de vijf dagtabbladen en het afzonderlijke blad Meldingen.
 // Leegmaken schakelt het ophalen van roostergegevens uit.
 window.ROOSTER_CONFIG = Object.freeze({
     publishedCsvBase: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTwLAU7EIWZYbzqEVPbDYYpbuQcE8WVIMLaqWRA4l43QFnpnX13H7svhuxExhydH3_VuG3o4NtUGIoK/pub',
-    meldingenUrl: '',
+    meldingenUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTwLAU7EIWZYbzqEVPbDYYpbuQcE8WVIMLaqWRA4l43QFnpnX13H7svhuxExhydH3_VuG3o4NtUGIoK/pub?gid=308528338&single=true&output=csv',
     schedules: {
         1: { gid: '0', label: 'Maandag', range: { startRow: 4, endRow: 12, startCol: 1, endCol: 6 }, supervisionHeaderRow: 15 },
         2: { gid: '603990815', label: 'Dinsdag', range: { startRow: 4, endRow: 12, startCol: 1, endCol: 6 }, supervisionHeaderRow: 15 },
