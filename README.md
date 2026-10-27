@@ -7,7 +7,9 @@ De oorspronkelijke website onder ManuelVanDyck blijft behouden.
 
 `config.js` bevat de vijf dagtabbladen van de nieuwe Sheet.
 De publicatielink in `publishedCsvBase` leest uitsluitend de vijf goedgekeurde
-openbare dagtabbladen. Wijzigingen worden door Google automatisch opnieuw gepubliceerd.
+openbare dagtabbladen. Daarnaast leest `meldingenUrl` uitsluitend het openbare
+tabblad **Meldingen** uit dezelfde nieuwe Sheet (gid 308528338).
+Wijzigingen worden door Google automatisch opnieuw gepubliceerd.
 
 Publiceer nooit het volledige werkboek: bronlessen, afwezigheidsinvoer,
 verwijderde uren, leerlingaantallen en intern leerkrachtennieuws horen niet in
@@ -22,8 +24,25 @@ Een vaste dag bekijken kan met `?dag=maandag`, `?dag=dinsdag`, enzovoort.
 Zonder deze parameter kiest de website de huidige weekdag en verbergt zij
 verstreken lesuren zoals de oorspronkelijke website.
 
-De oude meldingenbron is niet overgenomen. Een eigen meldingenbron kan later
-via `meldingenUrl` worden ingesteld.
+## Meldingen en PDF's
+
+Vul het tabblad **Meldingen** van de nieuwe Sheet in. De oude website en haar
+bron blijven onafhankelijk. De nieuwe website neemt de bestaande regels over.
+
+- `startdatum` en `einddatum`: periode waarin de melding geldt (inclusief).
+- `startuur` en `einduur`: bijvoorbeeld `10.55` en `11.10`.
+- `modus`: `split` voor rooster naast melding, `volledig` voor alleen de melding.
+  Leeg betekent `split`.
+- `titel` en `tekst`: optioneel.
+- `pdf1`: publieke link naar de eerste PDF; met alleen deze link blijft die staan.
+- `pdf2`: optionele tweede PDF, die afwisselt met de eerste.
+- `timer`: wisseltijd in seconden; standaard 15, minimum 3.
+
+Bij overlappende regels heeft de eerste actieve rij voorrang. Drive-bestanden
+moeten voor de bezoekers toegankelijk zijn; de website toont de eerste pagina
+via een afbeelding. Google-presentaties worden ook ondersteund. De website
+controleert de actieve periode elke 30 seconden en laadt de Sheet bij de
+automatische paginaverversing elke vijf minuten opnieuw.
 
 ## GitHub Pages
 
