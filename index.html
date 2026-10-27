@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vervangingsrooster — Atheneum Gentbrugge</title>
+    <script src="config.js"></script>
+    <!-- PDF.js lokaal gehost (legacy build): rendert PDF's zelf op canvas.
+         Nodig voor signage-WebViews (Pico XI) waar de Google Drive
+         preview-viewer (zware JS-app) crasht en een zwart vlak achterlaat.
+         Lokaal = geen CDN-afhankelijkheid op het signage-netwerk. -->
+    <script src="pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+        }
+    </script>
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #ffffff;
+            --header-bg: #1a1a2e;
+            --header-text: #ffffff;
+            --accent: #e94560;
+            --day-badge-bg: #16213e;
+            --day-badge-text: #e94560;
+            --text: #1a1a2e;
+            --text-secondary: #555;
+            --shadow: 0 2px 12px rgba(0,0,0,0.15);
+            --border: #e0e0e0;
+            --table-header-bg: #16213e;
+            --table-header-text: #ffffff;
+            --table-row-alt: #f5f6fa;
+            --time-col-bg: #e8eaf0;
+            --melding-bg: #fff8f0;
+            --melding-border: #f0c48a;
+            --melding-title: #b3541e;
+
+            --header-height: 80px;
+            --logo-size: 1.8rem;
+            --badge-size: 1rem;
+            --clock-size: 0.95rem;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0f0f1a;
+                --header-bg: #0a0a15;
+                --header-text: #e0e0e0;
+                --accent: #ff6b81;
+                --day-badge-bg: #1a1a30;
+                --day-badge-text: #ff6b81;
+                --text: #e0e0e0;
+                --text-secondary: #999;
+                --shadow: 0 2px 12px rgba(0,0,0,0.4);
+                --border: #2a2a3a;
+                --table-header-bg: #0d0d1a;
+                --table-header-text: #e0e0e0;
+                --table-row-alt: #161624;
+                --time-col-bg: #11111e;
+                --melding-bg: #1a1408;
+                --melding-border: #6b4e1e;
+                --melding-title: #ffb066;
+            }
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Header ── */
+        header {
+            background: var(--header-bg);
+            color: var(--header-text);
+            padding: 0 32px;
+            height: var(--header-height);
+            min-height: var(--header-height);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: var(--shadow);
+            z-index: 10;
+            position: relative;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            font-size: var(--logo-size);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--header-text);
+        }
+
+        .logo span {
+            color: var(--accent);
+        }
+
+        .day-badge {
+            background: var(--day-badge-bg);
+            color: var(--day-badge-text);
+            padding: 6px 20px;
+            border-radius: 24px;
+            font-size: var(--badge-size);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .header-right {
+            font-size: var(--clock-size);
+            color: var(--header-text);
+            opacity: 0.8;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ── Main: roster + melding panes ── */
+        main {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: row;
+        }
+
+        #rosterPane {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        #meldingPane {
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            border-left: 3px solid var(--melding-border);
+            background: var(--melding-bg);
+        }
+
+        body.mode-split #meldingPane { display: flex; width: 40%; flex: none; }
+        body.mode-full  #meldingPane { display: flex; width: 100%; flex: 1; border-left: none; }
+        body.mode-full  #rosterPane { display: none; }
+
+        /* ── Schedule table ── */
+        .schedule-table {
+            flex: 1;
+            height: 100%;
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .schedule-table thead th {
+            background: var(--table-header-bg);
+            color: var(--table-header-text);
+            font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+            font-weight: 600;
+            padding: 12px 10px;
+            text-align: left;
+            border-bottom: 2px solid var(--accent);
+            position: sticky;
+            top: 0;
+        }
+
+        .schedule-table tbody td {
+            font-size: clamp(0.8rem, 1.2vw, 1.3rem);
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--border);
+            line-height: 1.45;
+            vertical-align: top;
+            word-wrap: break-word;
+            white-space: pre-line;
+        }
+
+        /* "-----"-scheidingslijnen in cellen: laten wegvallen als inhoud */
+        .schedule-table tbody td .cell-sep {
+            opacity: 0.3;
+        }
+
+        .schedule-table tbody tr:nth-child(even) td {
+            background: var(--table-row-alt);
+        }
+
+        .schedule-table tbody td.time-col {
+            background: var(--time-col-bg);
+            font-weight: 700;
+            color: var(--text);
+            white-space: nowrap;
+            text-align: center;
+            vertical-align: middle; /* lesuur blijft netjes gecentreerd */
+        }
+
+        .schedule-table th:first-child,
+        .schedule-table td:first-child {
+            width: 18%;
+        }
+
+        .schedule-table tbody td:empty::after {
+            content: '—';
+            opacity: 0.3;
+        }
+
+        .schedule-table tbody tr {
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        .schedule-table tbody tr.past {
+            opacity: 0;
+            transform: translateY(-6px);
+        }
+
+        /* ── Melding panel ── */
+        .melding-head {
+            padding: 18px 28px 14px;
+            border-bottom: 2px solid var(--melding-border);
+        }
+
+        .melding-head h2 {
+            font-size: clamp(1.3rem, 2.2vw, 2rem);
+            font-weight: 700;
+            color: var(--melding-title);
+            letter-spacing: -0.01em;
+        }
+
+        .melding-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+        }
+
+        .melding-body .tekst {
+            padding: 18px 28px;
+            font-size: clamp(1.05rem, 1.7vw, 1.6rem);
+            line-height: 1.55;
+            white-space: pre-line;
+        }
+
+        .melding-body iframe {
+            flex: 1;
+            width: 100%;
+            border: none;
+            background: #fff;
+        }
+
+        /* PDF.js canvas-rendering (signage-safe) */
+        .pdf-canvas-container {
+            flex: 1;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            overflow: hidden;
+            background: #fff;
+            min-height: 0;
+        }
+
+        .pdf-canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* Gepubliceerde presentatie in de melding (iframe vult het paneel) */
+        .pdf-canvas-container iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: #fff;
+        }
+
+        /* Drive-thumbnail <img> (fallback, werkt op élke WebView) */
+        .pdf-canvas-container.img-mode .pdf-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        body.mode-split .melding-body iframe { min-height: 0; }
+        body.mode-full  .melding-body iframe { flex: 1; }
+
+        /* ── Generic states (weekend / end of day / error) ── */
+        .no-schedule {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            text-align: center;
+            padding: 48px;
+        }
+
+        .no-schedule .icon {
+            font-size: 6rem;
+            margin-bottom: 24px;
+            opacity: 0.6;
+        }
+
+        .no-schedule h2 {
+            font-size: clamp(1.8rem, 3vw, 2.8rem);
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text);
+        }
+
+        .no-schedule p {
+            font-size: clamp(1.1rem, 2vw, 1.5rem);
+            color: var(--text-secondary);
+            max-width: 500px;
+            line-height: 1.5;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            text-align: center;
+            padding: 48px;
+        }
+
+        .error-state .icon {
+            font-size: 5rem;
+            margin-bottom: 20px;
+        }
+
+        /* ── Mobile ── */
+        @media (max-width: 768px) {
+            :root {
+                --header-height: 56px;
+                --logo-size: 1.2rem;
+                --badge-size: 0.8rem;
+                --clock-size: 0.75rem;
+            }
+            header { padding: 0 16px; }
+            .header-left { gap: 12px; }
+            .day-badge { padding: 4px 14px; }
+            .schedule-table thead th { font-size: 0.7rem; padding: 6px 4px; }
+            .schedule-table tbody td { font-size: 0.65rem; padding: 6px 4px; }
+            main { flex-direction: column; }
+            body.mode-split #meldingPane { width: 100%; border-left: none; border-top: 3px solid var(--melding-border); height: 45%; flex: none; }
+            .melding-head { padding: 10px 14px 8px; }
+            .melding-body .tekst { padding: 10px 14px; font-size: 0.9rem; }
+        }
+    </style>
+    <script>
+        // ── Schaal-correctie voor signage-spelers ──
+        // De site is ontworpen op 1920px breedte. Sommige spelers (Chromebox in 4K,
+        // hoge DPI) rapporteren een veel grotere CSS-viewport terwijl het fysieke
+        // scherm gelijk blijft: alle rem/vw-clamps vallen dan op hun plafond en alles
+        // lijkt fysiek klein. Oplossing: root-font-size meeschalen met de viewport.
+        (function () {
+            var DESIGN_WIDTH = 1920;
+            var params = new URLSearchParams(location.search);
+            var zoom = parseFloat(params.get('zoom'));
+            if (!isFinite(zoom) || zoom <= 0) zoom = 1;
+            function applyScale() {
+                var w = document.documentElement.clientWidth;
+                var scale = Math.max(0.5, Math.min(3, (w / DESIGN_WIDTH) * zoom));
+                document.documentElement.style.fontSize = (16 * scale).toFixed(2) + 'px';
+            }
+            applyScale();
+            window.addEventListener('resize', applyScale);
+            // sommige signage-spelers wijzigen de viewport zonder resize-event
+            setInterval(applyScale, 2000);
+        })();
+    </script>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <div class="logo">📋 Vervangings<span>rooster</span></div>
+            <div class="day-badge" id="dayBadge">…</div>
+        </div>
+        <div class="header-right" id="clock">--:--</div>
+    </header>
+
+    <main id="main">
+        <div id="rosterPane">
+            <div class="loading"><div class="spinner"></div></div>
+        </div>
+        <aside id="meldingPane" aria-live="polite"></aside>
+    </main>
+
+    <script>
+        (function () {
+            // ══════════════════════════════════════════════════════════
+            //  CONFIG
+            // ══════════════════════════════════════════════════════════
+            const CONFIG = window.ROOSTER_CONFIG;
+            const CSV_BASE = CONFIG.publishedCsvBase;
+            const SCHEDULES = CONFIG.schedules;
+            const MELDINGEN_URL = CONFIG.meldingenUrl;
+
+            const DAY_NAMES = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+
+            const main = document.getElementById('main');
+            const rosterPane = document.getElementById('rosterPane');
+            const meldingPane = document.getElementById('meldingPane');
+            const dayBadge = document.getElementById('dayBadge');
+            const clockEl = document.getElementById('clock');
+
+            // ── Clock ──
+            function updateClock() {
+                const now = new Date();
+                clockEl.textContent = now.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+            }
+            updateClock();
+            setInterval(updateClock, 10000);
+
+            // ══════════════════════════════════════════════════════════
+            //  CSV PARSING
+            // ══════════════════════════════════════════════════════════
+            function parseCSV(text) {
+                const rows = [];
+                let row = [];
+                let cell = '';
+                let inQuotes = false;
+
+                for (let i = 0; i < text.length; i++) {
+                    const ch = text[i];
+
+                    if (inQuotes) {
+                        if (ch === '"') {
+                            if (text[i + 1] === '"') { cell += '"'; i++; }
+                            else { inQuotes = false; }
+                        } else {
+                            cell += ch;
+                        }
+                    } else {
+                        if (ch === '"') { inQuotes = true; }
+                        else if (ch === ',') { row.push(cell); cell = ''; }
+                        else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+                        else if (ch !== '\r') { cell += ch; }
+                    }
+                }
+                if (cell.length > 0 || row.length > 0) {
+                    row.push(cell);
+                    rows.push(row);
+                }
+                return rows;
+            }
+
+            function extractRange(csvData, range) {
+                const { startRow, endRow, startCol, endCol } = range;
+                const result = [];
+                for (let r = startRow - 1; r <= endRow - 1 && r < csvData.length; r++) {
+                    const csvRow = csvData[r] || [];
+                    const extracted = [];
+                    for (let c = startCol; c <= endCol; c++) {
+                        extracted.push((csvRow[c] || '').trim());
+                    }
+                    if (extracted.some(v => v.length > 0)) {
+                        result.push(extracted);
+                    }
+                }
+                return result;
+            }
+
+            function looksLikeHeader(cells) {
+                const joined = cells.join(' ').toUpperCase();
+                return joined.includes('LESUUR') || joined.includes('AFWEZIGE') || joined.includes('STUDIE');
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // "-----"-scheidingslijnen in een cel dimmen (geen echte inhoud).
+            // De regel zelf blijft staan — anders verschuiven de andere regels.
+            function formatCell(text) {
+                return escapeHtml(text).split('\n').map(line =>
+                    /^\s*-{2,}\s*$/.test(line) ? '<span class="cell-sep">' + line.trim() + '</span>' : line
+                ).join('\n');
+            }
+
+            function renderTable(data) {
+                let html = '<table class="schedule-table">';
+                data.forEach((row, rowIdx) => {
+                    if (rowIdx === 0 && looksLikeHeader(row)) {
+                        html += '<thead><tr>';
+                        row.forEach(cell => { html += `<th>${escapeHtml(cell)}</th>`; });
+                        html += '</tr></thead><tbody>';
+                    } else {
+                        html += '<tr>';
+                        row.forEach((cell, colIdx) => {
+                            const cls = colIdx === 0 ? ' class="time-col"' : '';
+                            html += `<td${cls}>${formatCell(cell)}</td>`;
+                        });
+                        html += '</tr>';
+                    }
+                });
+                if (data.length > 0 && looksLikeHeader(data[0])) { html += '</tbody>'; }
+                html += '</table>';
+                return html;
+            }
+
+            // ══════════════════════════════════════════════════════════
+            //  MELDINGEN (uit het tabblad "Meldingen")
+            //
+            //  Kolommen:  startdatum | einddatum | startuur | einduur | modus | titel | tekst | pdf | pdf1 | pdf2 | timer
+            //    startdatum : 24/08/2026  of  ma/di/wo/do/vr/za/zo  of  *  (elke dag)
+            //    einddatum  : idem — melding geldt t.e.m. deze datum (leeg of * = alleen startdatum)
+            //    startuur   :  10.00u   of   10:00
+            //    einduur    :  12.00u   of   12:00
+            //    modus :  split  (rooster + melding)  of  volledig  (alleen melding)
+            //    titel :  koptekst
+            //    tekst :  bericht (mag leeg als er een pdf is)
+            //    pdf   :  publieke Drive-link of directe PDF-URL (mag leeg)
+            //    pdf1  :  eerste PDF voor wissel-weergave (heeft voorrang op pdf)
+            //    pdf2  :  tweede PDF — pdf1 en pdf2 wisselen af, allebei invullen
+            //    timer :  wisselinterval in seconden (min 3, standaard 15)
+            // ══════════════════════════════════════════════════════════
+
+            // "10.00u" / "10:00" / "10u00" → minuten sinds middernacht
+            function parseTimeValue(text) {
+                if (!text) return null;
+                const m = String(text).match(/(\d{1,2})\s*[.:u]\s*(\d{0,2})/);
+                if (!m) return null;
+                const h = parseInt(m[1], 10);
+                const min = m[2] ? parseInt(m[2], 10) : 0;
+                if (h > 23 || min > 59) return null;
+                return h * 60 + min;
+            }
+
+            // datum-parser: '*' (elke dag), dd/mm/yyyy of weekdag (ma/di/wo/do/vr/za/zo)
+            function parseDateSpec(str) {
+                const s = String(str || '').trim().toLowerCase();
+                if (!s || s === '*' || s === 'altijd' || s === 'elke dag') return { type: 'any' };
+
+                // dd/mm/yyyy, dd/mm/yy of dd/mm (jaar weglaten kan — Sheets toont vaak zonder)
+                const dm = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?$/);
+                if (dm) {
+                    let y = dm[3] ? +dm[3] : null;
+                    if (y !== null && y < 100) y += 2000;
+                    return { type: 'date', d: +dm[1], m: +dm[2], y };
+                }
+
+                // weekdag: eerste 2 letters (ma/di/wo/do/vr/za/zo)
+                const wd = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
+                const two = s.slice(0, 2);
+                if (wd.includes(two)) return { type: 'weekday', idx: wd.indexOf(two) };
+                return null; // onherkenbaar
+            }
+
+            function matchSingleDate(spec, now) {
+                if (spec.type === 'any') return true;
+                if (spec.type === 'weekday') return now.getDay() === spec.idx;
+                const y = spec.y === null ? now.getFullYear() : spec.y;
+                return now.getDate() === spec.d && (now.getMonth() + 1) === spec.m && now.getFullYear() === y;
+            }
+
+            // datum-bereik: vandaag moet tussen startdatum en einddatum liggen (inclusief).
+            //  - beide leeg/'*'  → elke dag
+            //  - einddatum leeg  → alleen op de startdatum
+            //  - weekdag-bereik (bv. vr t/m ma) loopt circulair over het weekend
+            function dateInRange(startStr, endStr, now) {
+                const start = parseDateSpec(startStr);
+                const copy = parseDateSpec(endStr);
+                if (!start && !copy) return false;
+
+                const hasStart = start && start.type !== 'any';
+                const hasEnd = copy && copy.type !== 'any';
+                if (!hasStart && !hasEnd) return true;
+
+                if (hasStart && hasEnd) {
+                    if (start.type === 'date' && copy.type === 'date') {
+                        const t = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        // ontbrekend jaar invullen: start = dit jaar; eind = jaar van start,
+                        // en als eind vóór start valt → jaar later (jaar-grens-overgang)
+                        const sy = start.y === null ? now.getFullYear() : start.y;
+                        const ey = copy.y === null ? sy : copy.y;
+                        const sD = new Date(sy, start.m - 1, start.d);
+                        let eD = new Date(ey, copy.m - 1, copy.d);
+                        if (eD < sD && copy.y === null) eD = new Date(sy + 1, copy.m - 1, copy.d);
+                        return t >= sD && t <= eD;
+                    }
+                    if (start.type === 'weekday' || copy.type === 'weekday') {
+                        const d = now.getDay();
+                        return start.idx <= copy.idx
+                            ? (d >= start.idx && d <= copy.idx)
+                            : (d >= start.idx || d <= copy.idx);
+                    }
+                    // gemengd (datum + weekdag): beide los moeten kloppen
+                    return matchSingleDate(start, now) && matchSingleDate(copy, now);
+                }
+                return matchSingleDate(hasStart ? start : copy, now);
+            }
+
+            // Drive-link omzetten:
+            //  - fileId     → voor de thumbnail-<img> (fallback, werkt overal)
+            //  - downloadUrl → directe bytes voor PDF.js (CORS-vriendelijk)
+            function drivePdfUrls(rawUrl) {
+                if (!rawUrl) return { fileId: null, downloadUrl: null };
+                const u = String(rawUrl).trim();
+                let id = null;
+                let m = u.match(/drive\.google\.com\/file\/d\/([^/?#]+)/);
+                if (m) id = m[1];
+                if (!id) {
+                    // ook eigen download-URL's (drive.usercontent.google.com) herkennen
+                    m = u.match(/drive\.usercontent\.google\.com\/download\?id=([^&#]+)/);
+                    if (m) id = m[1];
+                }
+                if (id) {
+                    return {
+                        fileId: id,
+                        downloadUrl: 'https://drive.usercontent.google.com/download?id=' + id + '&export=download',
+                    };
+                }
+                // directe PDF-link elders
+                return { fileId: null, downloadUrl: u };
+            }
+
+            function toEmbeddablePdf(url) {
+                const urls = drivePdfUrls(url);
+                return urls.downloadUrl;
+            }
+
+            let meldingenCache = null;
+
+            function fetchMeldingen() {
+                if (!MELDINGEN_URL) return Promise.resolve([]);
+                if (meldingenCache) return Promise.resolve(meldingenCache);
+                const bust = '&cb=' + Date.now();
+                return fetch(MELDINGEN_URL + bust)
+                    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                    .then(csvText => {
+                        const rows = parseCSV(csvText);
+                        if (rows.length === 0) return [];
+                        // kolommen herkennen op kolomkop (volgorde onbelangrijk)
+                        const header = rows[0].map(h => (h || '').trim().toLowerCase());
+                        const col = (...names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+                        const cStart = col('startdatum', 'datum'), cEind = col('einddatum'),
+                              cStartUur = col('startuur', 'van'), cEindUur = col('einduur', 'tot'),
+                              cModus = col('modus'), cTitel = col('titel'), cTekst = col('tekst'), cPdf = col('pdf'),
+                              cPdf1 = col('pdf1'), cPdf2 = col('pdf2'), cTimer = col('timer');
+                        if (cStart < 0 || cStartUur < 0 || cEindUur < 0) {
+                            console.warn('Meldingen: kolommen startdatum/einddatum/startuur/einduur niet gevonden', header);
+                            return [];
+                        }
+                        const get = (row, i) => (i >= 0 && row[i] !== undefined) ? String(row[i]).trim() : '';
+                        const meldingen = [];
+                        for (let i = 1; i < rows.length; i++) {
+                            const row = rows[i];
+                            const startdatum = get(row, cStart), einddatum = get(row, cEind);
+                            const startuur = get(row, cStartUur), einduur = get(row, cEindUur);
+                            const titel = get(row, cTitel), tekst = get(row, cTekst), pdf = get(row, cPdf);
+                            const pdf1 = get(row, cPdf1), pdf2 = get(row, cPdf2), timer = get(row, cTimer);
+                            const modus = get(row, cModus).toLowerCase();
+                            if (!startdatum && !einddatum && !startuur && !einduur && !titel && !tekst && !pdf && !pdf1 && !pdf2) continue; // lege rij
+                            if (!startuur || !einduur || (!titel && !tekst && !pdf && !pdf1 && !pdf2)) continue; // onvolledig
+                            meldingen.push({
+                                startdatum, einddatum, startuur, einduur,
+                                modus: (modus === 'volledig' || modus === 'full') ? 'full' : 'split',
+                                titel, tekst, pdf: toEmbeddablePdf(pdf),
+                                // wissel-PDF's: pdf1+pdf2+timer (sec); hebben voorrang op pdf
+                                pdf1: toEmbeddablePdf(pdf1), pdf2: toEmbeddablePdf(pdf2), timer,
+                            });
+                        }
+                        meldingenCache = meldingen;
+                        return meldingen;
+                    })
+                    .catch(err => {
+                        console.warn('Meldingen niet geladen:', err.message);
+                        return [];
+                    });
+            }
+
+            function findActiveMelding(meldingen, now) {
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                for (const m of meldingen) {
+                    if (!dateInRange(m.startdatum, m.einddatum, now)) continue;
+                    const van = parseTimeValue(m.startuur);
+                    const tot = parseTimeValue(m.einduur);
+                    if (van === null || tot === null) continue;
+                    if (nowMin >= van && nowMin < tot) return m;
+                }
+                return null;
+            }
+
+            // ── Inhoud-rendering (PDF's én Google-presentaties) ──
+            // Strategie (robuust op signage-WebViews zoals Pico XI):
+            //  0. Google-presentatie → <iframe> via het /embed-formaat
+            //     (de /pub "publiceren op het web"-URL stuurt X-Frame-Options:
+            //     SAMEORIGIN en weigert in andermans iframe; een gewone deel-link
+            //     met /embed werkt wél — we bouwen die hier automatisch)
+            //  1. Drive-thumbnail <img> — gewoon een afbeelding, geen viewer, geen
+            //     CORS, geen fetch. Werkt op élke browser, hoe oud ook.
+            //     (toont pagina 1; meerdere pagina's: afzonderlijke melding-rijen)
+            //  2. PDF.js canvas (desktop-verfijning): haalt de echte PDF-binair op
+            //     en rendert met paging. Gebruikt dezelfde download-URL.
+            function presentationEmbedUrl(url) {
+                const u = String(url || '').trim();
+                // al een /embed- of /pub-URL? → ongewijzigd laten (pub-params bewaren)
+                if (/docs\.google\.[a-z.]+\/presentation\/d\/e\/[^/?#]+\/pub/.test(u)) return u;
+                if (/docs\.google\.[a-z.]+\/presentation\/d\/[A-Za-z0-9_-]+\/embed/.test(u)) return u;
+                // gewone deel-link (.../d/<ID>/edit?usp=sharing of /view) → /embed met autoplay
+                const m = u.match(/^(https:\/\/docs\.google\.[a-z.]+\/presentation\/d\/([A-Za-z0-9_-]+))/);
+                if (m) {
+                    const delay = (u.match(/[?&]delayms=(\d+)/) || [])[1] || '10000';
+                    return m[1] + '/embed?start=true&loop=true&delayms=' + delay;
+                }
+                return null;
+            }
+
+            function renderPdf(container, url, thumbnailMode) {
+                // Google-presentatie → iframe (auto-start/loop)
+                const slidesUrl = presentationEmbedUrl(url);
+                if (slidesUrl) {
+                    container.innerHTML = '';
+                    container.classList.remove('img-mode');
+                    const iframe = document.createElement('iframe');
+                    iframe.src = slidesUrl;
+                    iframe.title = thumbnailMode || 'Presentatie';
+                    iframe.allow = 'autoplay';
+                    container.appendChild(iframe);
+                    return;
+                }
+
+                const urls = drivePdfUrls(url);
+                const downloadUrl = urls.downloadUrl;
+                const fileId = urls.fileId;
+
+                // Fallback-<img> via Google's thumbnail-dienst
+                const showImgFallback = () => {
+                    container.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.className = 'pdf-img';
+                    img.src = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w2000';
+                    img.alt = thumbnailMode || 'Melding';
+                    img.onerror = () => { img.remove(); };
+                    container.appendChild(img);
+                    container.classList.add('img-mode');
+                };
+
+                // Geen PDF.js of geen directe URL → thumbnail-<img> (werkt overal)
+                if (!window.pdfjsLib || !downloadUrl) {
+                    showImgFallback();
+                    return;
+                }
+                // Drive-bestand: altijd de thumbnail-img — geen viewer die kan
+                // crashen (Pico XI), geen CORS-afhankelijkheid, werkt letterlijk
+                // overal. Meer pagina's → afzonderlijke melding-rijen per pagina.
+                if (fileId) {
+                    showImgFallback();
+                    return;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.className = 'pdf-canvas';
+                container.appendChild(canvas);
+
+                pdfjsLib.getDocument({ url: downloadUrl, withCredentials: false }).promise.then(pdf => {
+                    let pageNum = 1;
+                    const renderPage = () => {
+                        pdf.getPage(pageNum).then(page => {
+                            const containerRect = container.getBoundingClientRect();
+                            const scale = Math.max(
+                                (containerRect.width || 600) / page.getViewport({ scale: 1 }).width,
+                                (containerRect.height || 800) / page.getViewport({ scale: 1 }).height
+                            );
+                            const viewport = page.getViewport({ scale: scale });
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+                            canvas.style.width = '100%';
+                            canvas.style.height = 'auto';
+                            page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport });
+                        }).catch(() => {});
+                    };
+                    renderPage();
+                    if (pdf.numPages > 1) {
+                        let i = pageNum;
+                        setInterval(() => {
+                            i = i % pdf.numPages + 1;
+                            pageNum = i;
+                            renderPage();
+                        }, 10000); // volgende pagina elke 10 s
+                    }
+                }).catch(err => {
+                    console.warn('PDF.js kon de PDF niet laden:', err.message);
+                    showImgFallback();
+                });
+            }
+
+            let lastMeldingKey = null;
+            let pdfSwapTimer = null;
+
+            function stopPdfSwap() {
+                if (pdfSwapTimer) { clearInterval(pdfSwapTimer); pdfSwapTimer = null; }
+            }
+
+            function renderMelding(m) {
+                stopPdfSwap();
+                // pdf1/pdf2 (wissel-PDF's) hebben voorrang op de oude pdf-kolom;
+                // één van beide invullen = statische PDF, beide = afwisselen
+                const pdfLijst = [m.pdf1, m.pdf2].filter(Boolean);
+                const actievePdfs = pdfLijst.length > 0 ? pdfLijst : (m.pdf ? [m.pdf] : []);
+
+                let html = '';
+                if (m.titel) {
+                    html += `<div class="melding-head"><h2>${escapeHtml(m.titel)}</h2></div>`;
+                }
+                html += '<div class="melding-body">';
+                if (actievePdfs.length > 0) {
+                    if (m.tekst) html += `<div class="tekst">${escapeHtml(m.tekst)}</div>`;
+                    html += `<div class="pdf-canvas-container"></div>`;
+                } else if (m.tekst) {
+                    html += `<div class="tekst" style="flex:1; display:flex; align-items:center;">${escapeHtml(m.tekst)}</div>`;
+                }
+                html += '</div>';
+                meldingPane.innerHTML = html;
+
+                if (actievePdfs.length > 0) {
+                    const pdfContainer = meldingPane.querySelector('.pdf-canvas-container');
+                    renderPdf(pdfContainer, actievePdfs[0], m.titel);
+                    if (actievePdfs.length > 1) {
+                        // elke `timer` seconden wisselen (minimum 3 s, standaard 15 s)
+                        const sec = Math.max(3, parseInt(m.timer, 10) || 15);
+                        let idx = 0;
+                        pdfSwapTimer = setInterval(() => {
+                            idx = (idx + 1) % actievePdfs.length;
+                            renderPdf(pdfContainer, actievePdfs[idx], m.titel);
+                        }, sec * 1000);
+                    }
+                }
+            }
+
+            function applyMelding() {
+                return fetchMeldingen().then(meldingen => {
+                    const now = new Date();
+                    const active = findActiveMelding(meldingen, now);
+                    const key = active
+                        ? [active.startdatum, active.einddatum, active.startuur, active.titel, active.pdf1, active.pdf2, active.timer].join('|')
+                        : null;
+
+                    if (key === lastMeldingKey) return; // niets veranderd
+
+                    lastMeldingKey = key;
+                    if (!active) {
+                        stopPdfSwap();
+                        document.body.classList.remove('mode-split', 'mode-full');
+                        meldingPane.innerHTML = '';
+                        return;
+                    }
+                    renderMelding(active);
+                    document.body.classList.toggle('mode-full', active.modus === 'full');
+                    document.body.classList.toggle('mode-split', active.modus !== 'full');
+                });
+            }
+
+            // ══════════════════════════════════════════════════════════
+            //  ROSTER
+            // ══════════════════════════════════════════════════════════
+            function parseTimeSlot(text) {
+                const m = text.match(/(\d{1,2})\.(\d{2})u\s*-\s*(\d{1,2})\.(\d{2})u/);
+                if (!m) return null;
+                return { start: parseInt(m[1]) * 60 + parseInt(m[2]), end: parseInt(m[3]) * 60 + parseInt(m[4]) };
+            }
+
+            function updatePastRows(initial) {
+                const now = new Date();
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                const rows = document.querySelectorAll('.schedule-table tbody tr');
+                let visible = 0;
+
+                rows.forEach(function (tr) {
+                    if (tr.classList.contains('past')) return;
+                    const timeCell = tr.querySelector('td.time-col');
+                    if (!timeCell) return;
+                    const slot = parseTimeSlot(timeCell.textContent);
+                    if (slot && nowMin >= slot.end) {
+                        tr.classList.add('past');
+                        if (initial) {
+                            tr.style.display = 'none';
+                        } else {
+                            setTimeout(function () { tr.style.display = 'none'; }, 650);
+                        }
+                    }
+                    if (!tr.classList.contains('past')) visible++;
+                });
+
+                if (visible === 0 && rows.length > 0) {
+                    rosterPane.innerHTML = `
+                        <div class="no-schedule">
+                            <div class="icon">🏁</div>
+                            <h2>Schooldag zit erop</h2>
+                            <p>Alle lesuren zijn afgelopen. Tot morgen!</p>
+                        </div>
+                    `;
+                }
+            }
+
+            function renderSmallSupervisions(csvData, schedule) {
+                const rows = extractRange(csvData, {
+                    startRow: schedule.supervisionHeaderRow,
+                    endRow: csvData.length,
+                    startCol: 1,
+                    endCol: 4,
+                });
+                if (rows.length < 2) return '';
+                return '<section aria-label="Vervanging kleine toezichten"><h2 style="margin:24px 0 12px;font-size:1.3rem">Vervanging kleine toezichten</h2>' + renderTable(rows) + '</section>';
+            }
+
+            // ── Day detection ──
+            const today = new Date();
+            const requestedDay = new URLSearchParams(location.search).get('dag');
+            const selectedDay = Object.keys(SCHEDULES).find(key => SCHEDULES[key].label.toLowerCase() === String(requestedDay).toLowerCase());
+            const dayIndex = selectedDay ? Number(selectedDay) : today.getDay();
+            const dayName = DAY_NAMES[dayIndex];
+            const schedule = SCHEDULES[dayIndex];
+
+            dayBadge.textContent = dayName;
+
+            if (!schedule) {
+                rosterPane.innerHTML = `
+                    <div class="no-schedule">
+                        <div class="icon">🏖️</div>
+                        <h2>Geen rooster vandaag</h2>
+                        <p>Het is ${dayName.toLowerCase()}. Het vervangingsrooster is er weer op maandag.</p>
+                    </div>
+                `;
+            } else if (!CSV_BASE) {
+                rosterPane.innerHTML = '<div class="no-schedule"><h2>Roosterkoppeling wordt ingesteld</h2><p>De nieuwe website is nog niet verbonden met de roostergegevens.</p></div>';
+            } else {
+                const csvUrl = `${CSV_BASE}?gid=${schedule.gid}&single=true&output=csv`;
+
+                fetch(csvUrl)
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        const type = res.headers.get('content-type') || '';
+                        if (/text\/html/i.test(type)) throw new Error('De roosterbron geeft geen CSV. Controleer de publicatielink.');
+                        return res.text();
+                    })
+                    .then(csvText => {
+                        const csvData = parseCSV(csvText);
+                        const cellData = extractRange(csvData, schedule.range);
+
+                        if (cellData.length === 0) {
+                            rosterPane.innerHTML = `
+                                <div class="no-schedule">
+                                    <div class="icon">📭</div>
+                                    <h2>Geen vervangingen vandaag</h2>
+                                    <p>Het rooster is leeg voor ${schedule.label.toLowerCase()}.</p>
+                                </div>
+                            `;
+                            return;
+                        }
+
+                        rosterPane.innerHTML = renderTable(cellData) + renderSmallSupervisions(csvData, schedule);
+                        dayBadge.textContent = schedule.label;
+                        if (!selectedDay) updatePastRows(true);
+                    })
+                    .catch(err => {
+                        console.error('Fetch error:', err);
+                        rosterPane.innerHTML = `
+                            <div class="error-state">
+                                <div class="icon">⚠️</div>
+                                <h2>Rooster kan niet geladen worden</h2>
+                                <p style="font-size:1.2rem;color:var(--text-secondary);">${escapeHtml(err.message)}</p>
+                            </div>
+                        `;
+                    });
+            }
+
+            // ── Elke 30 s: verdwenen lesuren + actieve melding ──
+            setInterval(function () {
+                if (!selectedDay) updatePastRows(false);
+                applyMelding();
+            }, 30000);
+            applyMelding();
+
+            // ── Auto-refresh every 5 minutes ──
+            setInterval(function () {
+                location.reload();
+            }, 5 * 60 * 1000);
+        })();
+    </script>
+
+</body>
+</html>
