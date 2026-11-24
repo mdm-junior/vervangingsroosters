@@ -44,6 +44,12 @@ function verwerkVerzoek(verzoekId, type, soort, aanvraagId, door) {
       planWachtrij_();
       return WACHTRIJ;
     }
+    if (type === 'Gewijzigd') {
+      // Gelogd door de bot "Wijziging na doorsturen": niets te doen, enkel registreren.
+      const melding = 'Aanvraag gewijzigd na doorsturen: vervangingen nakijken (eventueel intrekken en opnieuw voorstellen).';
+      metSlot_(() => schrijfResultaat_(verzoekId, melding));
+      return melding;
+    }
     if (type !== 'Voorstellen') throw new Error('Onbekend verzoektype: ' + type);
     return metSlot_(() => {
       const resultaat = stelVoor_(soort, aanvraagId);
